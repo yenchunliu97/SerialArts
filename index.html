@@ -1,129 +1,3005 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Visual Preference Survey</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shape Preference Survey</title>
 
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       font-family: Arial, sans-serif;
       text-align: center;
       margin: 30px;
+      background: #faf7f0;
+      color: #333;
+    }
+
+    h2 {
+      margin-bottom: 5px;
     }
 
     .survey {
       display: flex;
       justify-content: center;
-      gap: 60px;
+      align-items: flex-start;
+      gap: 70px;
       margin-top: 30px;
+      flex-wrap: wrap;
     }
 
-    .design {
-      display: grid;
-      grid-template-columns: repeat(3, 120px);
-      grid-template-rows: repeat(3, 120px);
-      gap: 5px;
+    .panel {
+      text-align: center;
+    }
+
+    .canvas {
+      position: relative;
+      width: 420px;
+      height: 520px;
+      background: #fffdf8;
+      border: 2px solid #ddd0c0;
+      border-radius: 16px;
       cursor: pointer;
-      border: 4px solid transparent;
-      padding: 10px;
+      overflow: hidden;
+      transition: border-color 0.15s, transform 0.15s;
     }
 
-    .design:hover {
-      border: 4px solid #555;
+    .canvas:hover {
+      border-color: #8c7a66;
+      transform: translateY(-2px);
     }
 
-    .design img {
-      width: 120px;
-      height: 120px;
-      object-fit: cover;
+    .canvas.disabled {
+      pointer-events: none;
+      opacity: 0.75;
+    }
+
+    .piece {
+      position: absolute;
+      height: auto;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    #progress {
+      margin-top: 20px;
+      font-size: 16px;
+    }
+
+    #status {
+      min-height: 24px;
+      margin-top: 8px;
+      font-size: 14px;
+      color: #6b6259;
+    }
+
+    .completion {
+      margin: 100px auto;
+      max-width: 600px;
+      padding: 40px;
+      background: #fffdf8;
+      border: 2px solid #ddd0c0;
+      border-radius: 16px;
+    }
+
+    @media (max-width: 950px) {
+      body {
+        margin: 16px;
+      }
+
+      .survey {
+        gap: 28px;
+      }
+
+      .canvas {
+        width: 360px;
+        height: 446px;
+        transform-origin: top left;
+      }
     }
   </style>
 </head>
 
 <body>
+  <h2>Which shape looks more like a swan?</h2>
+  <p>Click the left or right image.</p>
 
-<h2>Which arrangement do you prefer?</h2>
-<p>Click the image arrangement you prefer.</p>
+  <div class="survey">
+    <div class="panel">
+      <h3>Left</h3>
+      <div id="leftDesign" class="canvas" role="button" tabindex="0"
+           aria-label="Choose the left design"></div>
+    </div>
 
-<div class="survey">
-  <div>
-    <h3>Left</h3>
-    <div id="leftDesign" class="design" onclick="submitChoice('left')"></div>
+    <div class="panel">
+      <h3>Right</h3>
+      <div id="rightDesign" class="canvas" role="button" tabindex="0"
+           aria-label="Choose the right design"></div>
+    </div>
   </div>
 
-  <div>
-    <h3>Right</h3>
-    <div id="rightDesign" class="design" onclick="submitChoice('right')"></div>
-  </div>
-</div>
-
-<p id="progress"></p>
+  <p id="progress"></p>
+  <p id="status"></p>
 
 <script>
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxPQlehjmHvwBka8R6lnIC10MS_lHl75TwVw8pdt6DqaqeyIwusAelCfAWAnBcmYo7T/exec";
+"use strict";
 
-const participant_id = crypto.randomUUID();
+/* =====================================================
+   1. Google Sheets Apps Script URL
+   ===================================================== */
 
-const comparisons = [
-  ["123456789", "456813279"],
-  ["132456789", "213456789"],
-  ["813459276", "762854193"],
-  ["613247859", "846257139"],
-  ["946817532", "398765214"]
+const GOOGLE_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbxPQlehjmHvwBka8R6lnIC10MS_lHl75TwVw8pdt6DqaqeyIwusAelCfAWAnBcmYo7T/exec";
+
+
+/* =====================================================
+   2. Participant/session identifiers
+
+   sessionStorage keeps the same assignment if the user
+   refreshes the page in the same browser tab.
+   ===================================================== */
+
+function makeId() {
+  if (window.crypto && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return "p-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+}
+
+let participant_id = sessionStorage.getItem("participant_id");
+
+if (!participant_id) {
+  participant_id = makeId();
+  sessionStorage.setItem("participant_id", participant_id);
+}
+
+
+/* =====================================================
+   3. Piece image settings
+   ===================================================== */
+
+const pieceFolder = "bricks_images";
+
+const pieceWidths = {
+  "1": 108,
+  "2": 108,
+  "3": 208,
+  "4": 269,
+  "5": 128,
+  "6": 198,
+  "7": 141
+};
+
+const positions = [
+  {x: 23,  y: 106},  // position 1
+  {x: 81,  y: 109},  // position 2
+  {x: 163, y: 182},  // position 3
+  {x: 117, y: 259},  // position 4
+  {x: 32,  y: 286},  // position 5
+  {x: 116, y: 376},  // position 6
+  {x: 261, y: 318}   // position 7
 ];
 
-let trial = 0;
+
+/* =====================================================
+   4. Design labels L1,...,L82 mapped to permutations
+   ===================================================== */
+
+const designMap = {
+  "L1": "1234567",
+  "L2": "1324567",
+  "L3": "4231567",
+  "L4": "1432567",
+  "L5": "1234657",
+  "L6": "1243567",
+  "L7": "1234765",
+  "L8": "1235467",
+  "L9": "1734562",
+  "L10": "1236547",
+  "L11": "1237564",
+  "L12": "2134567",
+  "L13": "1254367",
+  "L14": "1534267",
+  "L15": "5234167",
+  "L16": "1264537",
+  "L17": "1234576",
+  "L18": "1634527",
+  "L19": "3214567",
+  "L20": "6234517",
+  "L21": "1274563",
+  "L22": "7234561",
+  "L23": "1634257",
+  "L24": "1235647",
+  "L25": "7234516",
+  "L26": "1264573",
+  "L27": "1624537",
+  "L28": "5234761",
+  "L29": "1342567",
+  "L30": "3274561",
+  "L31": "1274365",
+  "L32": "1247563",
+  "L33": "1532467",
+  "L34": "4132567",
+  "L35": "5234617",
+  "L36": "2314567",
+  "L37": "2431567",
+  "L38": "6234571",
+  "L39": "1274536",
+  "L40": "1534762",
+  "L41": "1437562",
+  "L42": "3254167",
+  "L43": "5231467",
+  "L44": "4213567",
+  "L45": "1524367",
+  "L46": "1534627",
+  "L47": "1724563",
+  "L48": "1436527",
+  "L49": "1235764",
+  "L50": "1236457",
+  "L51": "7134562",
+  "L52": "1254637",
+  "L53": "1263547",
+  "L54": "1374562",
+  "L55": "6231547",
+  "L56": "4237561",
+  "L57": "1634572",
+  "L58": "2734561",
+  "L59": "3124567",
+  "L60": "1435267",
+  "L61": "1273564",
+  "L62": "1253467",
+  "L63": "1632547",
+  "L64": "1237465",
+  "L65": "1254763",
+  "L66": "2534167",
+  "L67": "1734526",
+  "L68": "6234157",
+  "L69": "4235167",
+  "L70": "4236517",
+  "L71": "1246537",
+  "L72": "1423567",
+  "L73": "1354267",
+  "L74": "1234756",
+  "L75": "1237546",
+  "L76": "3264517",
+  "L77": "7234165",
+  "L78": "7534261",
+  "L79": "2341567",
+  "L80": "5431267",
+  "L81": "1764523",
+  "L82": "1273546"
+};
+
+
+/* =====================================================
+   5. Thirty survey versions from Choice Profiles.csv
+
+   Each survey contains exactly 20 pairs of labels.
+   ===================================================== */
+
+const surveyProfiles = {
+  "1": [
+    [
+      "L50",
+      "L41"
+    ],
+    [
+      "L4",
+      "L32"
+    ],
+    [
+      "L32",
+      "L55"
+    ],
+    [
+      "L59",
+      "L50"
+    ],
+    [
+      "L48",
+      "L41"
+    ],
+    [
+      "L59",
+      "L62"
+    ],
+    [
+      "L50",
+      "L30"
+    ],
+    [
+      "L32",
+      "L43"
+    ],
+    [
+      "L72",
+      "L70"
+    ],
+    [
+      "L52",
+      "L53"
+    ],
+    [
+      "L41",
+      "L19"
+    ],
+    [
+      "L32",
+      "L52"
+    ],
+    [
+      "L59",
+      "L26"
+    ],
+    [
+      "L52",
+      "L11"
+    ],
+    [
+      "L32",
+      "L58"
+    ],
+    [
+      "L81",
+      "L38"
+    ],
+    [
+      "L47",
+      "L11"
+    ],
+    [
+      "L62",
+      "L71"
+    ],
+    [
+      "L48",
+      "L73"
+    ],
+    [
+      "L67",
+      "L26"
+    ]
+  ],
+  "2": [
+    [
+      "L52",
+      "L49"
+    ],
+    [
+      "L47",
+      "L32"
+    ],
+    [
+      "L5",
+      "L59"
+    ],
+    [
+      "L50",
+      "L63"
+    ],
+    [
+      "L71",
+      "L74"
+    ],
+    [
+      "L8",
+      "L59"
+    ],
+    [
+      "L2",
+      "L25"
+    ],
+    [
+      "L19",
+      "L60"
+    ],
+    [
+      "L53",
+      "L44"
+    ],
+    [
+      "L26",
+      "L82"
+    ],
+    [
+      "L32",
+      "L67"
+    ],
+    [
+      "L68",
+      "L81"
+    ],
+    [
+      "L43",
+      "L3"
+    ],
+    [
+      "L8",
+      "L79"
+    ],
+    [
+      "L12",
+      "L19"
+    ],
+    [
+      "L17",
+      "L49"
+    ],
+    [
+      "L41",
+      "L81"
+    ],
+    [
+      "L45",
+      "L52"
+    ],
+    [
+      "L12",
+      "L37"
+    ],
+    [
+      "L1",
+      "L10"
+    ]
+  ],
+  "3": [
+    [
+      "L6",
+      "L60"
+    ],
+    [
+      "L26",
+      "L11"
+    ],
+    [
+      "L80",
+      "L6"
+    ],
+    [
+      "L57",
+      "L2"
+    ],
+    [
+      "L49",
+      "L43"
+    ],
+    [
+      "L45",
+      "L8"
+    ],
+    [
+      "L7",
+      "L32"
+    ],
+    [
+      "L63",
+      "L82"
+    ],
+    [
+      "L17",
+      "L81"
+    ],
+    [
+      "L35",
+      "L61"
+    ],
+    [
+      "L28",
+      "L25"
+    ],
+    [
+      "L59",
+      "L17"
+    ],
+    [
+      "L26",
+      "L49"
+    ],
+    [
+      "L47",
+      "L66"
+    ],
+    [
+      "L14",
+      "L16"
+    ],
+    [
+      "L80",
+      "L24"
+    ],
+    [
+      "L2",
+      "L81"
+    ],
+    [
+      "L58",
+      "L3"
+    ],
+    [
+      "L50",
+      "L14"
+    ],
+    [
+      "L82",
+      "L12"
+    ]
+  ],
+  "4": [
+    [
+      "L79",
+      "L34"
+    ],
+    [
+      "L54",
+      "L8"
+    ],
+    [
+      "L41",
+      "L3"
+    ],
+    [
+      "L37",
+      "L63"
+    ],
+    [
+      "L25",
+      "L45"
+    ],
+    [
+      "L23",
+      "L72"
+    ],
+    [
+      "L46",
+      "L52"
+    ],
+    [
+      "L52",
+      "L3"
+    ],
+    [
+      "L58",
+      "L22"
+    ],
+    [
+      "L63",
+      "L15"
+    ],
+    [
+      "L80",
+      "L54"
+    ],
+    [
+      "L63",
+      "L5"
+    ],
+    [
+      "L28",
+      "L30"
+    ],
+    [
+      "L52",
+      "L35"
+    ],
+    [
+      "L33",
+      "L80"
+    ],
+    [
+      "L12",
+      "L32"
+    ],
+    [
+      "L42",
+      "L59"
+    ],
+    [
+      "L36",
+      "L58"
+    ],
+    [
+      "L35",
+      "L30"
+    ],
+    [
+      "L45",
+      "L50"
+    ]
+  ],
+  "5": [
+    [
+      "L66",
+      "L24"
+    ],
+    [
+      "L43",
+      "L44"
+    ],
+    [
+      "L32",
+      "L81"
+    ],
+    [
+      "L2",
+      "L23"
+    ],
+    [
+      "L71",
+      "L63"
+    ],
+    [
+      "L80",
+      "L68"
+    ],
+    [
+      "L13",
+      "L19"
+    ],
+    [
+      "L69",
+      "L74"
+    ],
+    [
+      "L59",
+      "L70"
+    ],
+    [
+      "L58",
+      "L40"
+    ],
+    [
+      "L32",
+      "L15"
+    ],
+    [
+      "L4",
+      "L61"
+    ],
+    [
+      "L26",
+      "L23"
+    ],
+    [
+      "L70",
+      "L57"
+    ],
+    [
+      "L58",
+      "L8"
+    ],
+    [
+      "L63",
+      "L17"
+    ],
+    [
+      "L7",
+      "L56"
+    ],
+    [
+      "L24",
+      "L8"
+    ],
+    [
+      "L28",
+      "L62"
+    ],
+    [
+      "L57",
+      "L41"
+    ]
+  ],
+  "6": [
+    [
+      "L1",
+      "L47"
+    ],
+    [
+      "L11",
+      "L8"
+    ],
+    [
+      "L37",
+      "L72"
+    ],
+    [
+      "L37",
+      "L62"
+    ],
+    [
+      "L78",
+      "L64"
+    ],
+    [
+      "L54",
+      "L47"
+    ],
+    [
+      "L45",
+      "L12"
+    ],
+    [
+      "L57",
+      "L13"
+    ],
+    [
+      "L67",
+      "L5"
+    ],
+    [
+      "L77",
+      "L74"
+    ],
+    [
+      "L79",
+      "L4"
+    ],
+    [
+      "L41",
+      "L21"
+    ],
+    [
+      "L77",
+      "L30"
+    ],
+    [
+      "L15",
+      "L41"
+    ],
+    [
+      "L38",
+      "L35"
+    ],
+    [
+      "L1",
+      "L36"
+    ],
+    [
+      "L77",
+      "L81"
+    ],
+    [
+      "L60",
+      "L28"
+    ],
+    [
+      "L62",
+      "L13"
+    ],
+    [
+      "L49",
+      "L76"
+    ]
+  ],
+  "7": [
+    [
+      "L25",
+      "L55"
+    ],
+    [
+      "L50",
+      "L38"
+    ],
+    [
+      "L24",
+      "L27"
+    ],
+    [
+      "L59",
+      "L3"
+    ],
+    [
+      "L32",
+      "L69"
+    ],
+    [
+      "L71",
+      "L57"
+    ],
+    [
+      "L55",
+      "L63"
+    ],
+    [
+      "L52",
+      "L71"
+    ],
+    [
+      "L14",
+      "L1"
+    ],
+    [
+      "L19",
+      "L56"
+    ],
+    [
+      "L3",
+      "L37"
+    ],
+    [
+      "L12",
+      "L40"
+    ],
+    [
+      "L8",
+      "L37"
+    ],
+    [
+      "L1",
+      "L67"
+    ],
+    [
+      "L28",
+      "L40"
+    ],
+    [
+      "L6",
+      "L29"
+    ],
+    [
+      "L67",
+      "L74"
+    ],
+    [
+      "L12",
+      "L61"
+    ],
+    [
+      "L74",
+      "L6"
+    ],
+    [
+      "L7",
+      "L17"
+    ]
+  ],
+  "8": [
+    [
+      "L29",
+      "L36"
+    ],
+    [
+      "L30",
+      "L70"
+    ],
+    [
+      "L20",
+      "L3"
+    ],
+    [
+      "L7",
+      "L46"
+    ],
+    [
+      "L28",
+      "L67"
+    ],
+    [
+      "L24",
+      "L15"
+    ],
+    [
+      "L14",
+      "L25"
+    ],
+    [
+      "L50",
+      "L7"
+    ],
+    [
+      "L46",
+      "L34"
+    ],
+    [
+      "L44",
+      "L35"
+    ],
+    [
+      "L73",
+      "L37"
+    ],
+    [
+      "L61",
+      "L42"
+    ],
+    [
+      "L19",
+      "L49"
+    ],
+    [
+      "L53",
+      "L51"
+    ],
+    [
+      "L38",
+      "L43"
+    ],
+    [
+      "L21",
+      "L64"
+    ],
+    [
+      "L35",
+      "L48"
+    ],
+    [
+      "L18",
+      "L13"
+    ],
+    [
+      "L64",
+      "L26"
+    ],
+    [
+      "L57",
+      "L20"
+    ]
+  ],
+  "9": [
+    [
+      "L39",
+      "L17"
+    ],
+    [
+      "L63",
+      "L29"
+    ],
+    [
+      "L26",
+      "L40"
+    ],
+    [
+      "L62",
+      "L46"
+    ],
+    [
+      "L69",
+      "L2"
+    ],
+    [
+      "L2",
+      "L78"
+    ],
+    [
+      "L2",
+      "L16"
+    ],
+    [
+      "L24",
+      "L43"
+    ],
+    [
+      "L38",
+      "L11"
+    ],
+    [
+      "L71",
+      "L38"
+    ],
+    [
+      "L70",
+      "L39"
+    ],
+    [
+      "L7",
+      "L11"
+    ],
+    [
+      "L26",
+      "L15"
+    ],
+    [
+      "L52",
+      "L73"
+    ],
+    [
+      "L11",
+      "L36"
+    ],
+    [
+      "L50",
+      "L2"
+    ],
+    [
+      "L78",
+      "L68"
+    ],
+    [
+      "L33",
+      "L79"
+    ],
+    [
+      "L38",
+      "L67"
+    ],
+    [
+      "L16",
+      "L56"
+    ]
+  ],
+  "10": [
+    [
+      "L82",
+      "L74"
+    ],
+    [
+      "L46",
+      "L16"
+    ],
+    [
+      "L55",
+      "L3"
+    ],
+    [
+      "L42",
+      "L44"
+    ],
+    [
+      "L39",
+      "L42"
+    ],
+    [
+      "L29",
+      "L21"
+    ],
+    [
+      "L4",
+      "L60"
+    ],
+    [
+      "L40",
+      "L44"
+    ],
+    [
+      "L4",
+      "L77"
+    ],
+    [
+      "L24",
+      "L31"
+    ],
+    [
+      "L11",
+      "L2"
+    ],
+    [
+      "L37",
+      "L67"
+    ],
+    [
+      "L16",
+      "L63"
+    ],
+    [
+      "L53",
+      "L69"
+    ],
+    [
+      "L67",
+      "L65"
+    ],
+    [
+      "L55",
+      "L44"
+    ],
+    [
+      "L34",
+      "L82"
+    ],
+    [
+      "L7",
+      "L82"
+    ],
+    [
+      "L49",
+      "L66"
+    ],
+    [
+      "L56",
+      "L37"
+    ]
+  ],
+  "11": [
+    [
+      "L6",
+      "L18"
+    ],
+    [
+      "L6",
+      "L17"
+    ],
+    [
+      "L26",
+      "L77"
+    ],
+    [
+      "L35",
+      "L29"
+    ],
+    [
+      "L69",
+      "L40"
+    ],
+    [
+      "L62",
+      "L36"
+    ],
+    [
+      "L15",
+      "L68"
+    ],
+    [
+      "L3",
+      "L13"
+    ],
+    [
+      "L17",
+      "L21"
+    ],
+    [
+      "L66",
+      "L70"
+    ],
+    [
+      "L80",
+      "L42"
+    ],
+    [
+      "L60",
+      "L35"
+    ],
+    [
+      "L20",
+      "L53"
+    ],
+    [
+      "L31",
+      "L55"
+    ],
+    [
+      "L77",
+      "L45"
+    ],
+    [
+      "L75",
+      "L66"
+    ],
+    [
+      "L36",
+      "L73"
+    ],
+    [
+      "L40",
+      "L48"
+    ],
+    [
+      "L18",
+      "L23"
+    ],
+    [
+      "L14",
+      "L58"
+    ]
+  ],
+  "12": [
+    [
+      "L67",
+      "L66"
+    ],
+    [
+      "L54",
+      "L39"
+    ],
+    [
+      "L50",
+      "L20"
+    ],
+    [
+      "L46",
+      "L29"
+    ],
+    [
+      "L5",
+      "L21"
+    ],
+    [
+      "L61",
+      "L65"
+    ],
+    [
+      "L11",
+      "L76"
+    ],
+    [
+      "L37",
+      "L64"
+    ],
+    [
+      "L38",
+      "L18"
+    ],
+    [
+      "L37",
+      "L39"
+    ],
+    [
+      "L9",
+      "L43"
+    ],
+    [
+      "L37",
+      "L2"
+    ],
+    [
+      "L19",
+      "L59"
+    ],
+    [
+      "L42",
+      "L9"
+    ],
+    [
+      "L5",
+      "L81"
+    ],
+    [
+      "L53",
+      "L82"
+    ],
+    [
+      "L34",
+      "L38"
+    ],
+    [
+      "L34",
+      "L58"
+    ],
+    [
+      "L58",
+      "L56"
+    ],
+    [
+      "L28",
+      "L20"
+    ]
+  ],
+  "13": [
+    [
+      "L56",
+      "L53"
+    ],
+    [
+      "L42",
+      "L81"
+    ],
+    [
+      "L62",
+      "L6"
+    ],
+    [
+      "L13",
+      "L7"
+    ],
+    [
+      "L65",
+      "L82"
+    ],
+    [
+      "L8",
+      "L57"
+    ],
+    [
+      "L40",
+      "L52"
+    ],
+    [
+      "L68",
+      "L52"
+    ],
+    [
+      "L80",
+      "L64"
+    ],
+    [
+      "L68",
+      "L76"
+    ],
+    [
+      "L41",
+      "L54"
+    ],
+    [
+      "L75",
+      "L35"
+    ],
+    [
+      "L20",
+      "L34"
+    ],
+    [
+      "L77",
+      "L47"
+    ],
+    [
+      "L76",
+      "L12"
+    ],
+    [
+      "L75",
+      "L54"
+    ],
+    [
+      "L33",
+      "L56"
+    ],
+    [
+      "L65",
+      "L43"
+    ],
+    [
+      "L41",
+      "L23"
+    ],
+    [
+      "L5",
+      "L25"
+    ]
+  ],
+  "14": [
+    [
+      "L40",
+      "L54"
+    ],
+    [
+      "L28",
+      "L33"
+    ],
+    [
+      "L39",
+      "L26"
+    ],
+    [
+      "L45",
+      "L48"
+    ],
+    [
+      "L12",
+      "L18"
+    ],
+    [
+      "L31",
+      "L46"
+    ],
+    [
+      "L75",
+      "L76"
+    ],
+    [
+      "L33",
+      "L75"
+    ],
+    [
+      "L27",
+      "L67"
+    ],
+    [
+      "L71",
+      "L39"
+    ],
+    [
+      "L15",
+      "L25"
+    ],
+    [
+      "L34",
+      "L6"
+    ],
+    [
+      "L54",
+      "L25"
+    ],
+    [
+      "L46",
+      "L70"
+    ],
+    [
+      "L24",
+      "L62"
+    ],
+    [
+      "L34",
+      "L5"
+    ],
+    [
+      "L51",
+      "L58"
+    ],
+    [
+      "L78",
+      "L48"
+    ],
+    [
+      "L39",
+      "L24"
+    ],
+    [
+      "L6",
+      "L73"
+    ]
+  ],
+  "15": [
+    [
+      "L57",
+      "L43"
+    ],
+    [
+      "L14",
+      "L68"
+    ],
+    [
+      "L58",
+      "L74"
+    ],
+    [
+      "L12",
+      "L22"
+    ],
+    [
+      "L60",
+      "L76"
+    ],
+    [
+      "L77",
+      "L14"
+    ],
+    [
+      "L46",
+      "L64"
+    ],
+    [
+      "L15",
+      "L30"
+    ],
+    [
+      "L53",
+      "L17"
+    ],
+    [
+      "L16",
+      "L44"
+    ],
+    [
+      "L49",
+      "L29"
+    ],
+    [
+      "L69",
+      "L24"
+    ],
+    [
+      "L23",
+      "L76"
+    ],
+    [
+      "L38",
+      "L80"
+    ],
+    [
+      "L43",
+      "L51"
+    ],
+    [
+      "L33",
+      "L31"
+    ],
+    [
+      "L22",
+      "L15"
+    ],
+    [
+      "L31",
+      "L51"
+    ],
+    [
+      "L48",
+      "L67"
+    ],
+    [
+      "L55",
+      "L64"
+    ]
+  ],
+  "16": [
+    [
+      "L74",
+      "L76"
+    ],
+    [
+      "L19",
+      "L47"
+    ],
+    [
+      "L18",
+      "L79"
+    ],
+    [
+      "L66",
+      "L81"
+    ],
+    [
+      "L36",
+      "L44"
+    ],
+    [
+      "L39",
+      "L65"
+    ],
+    [
+      "L6",
+      "L43"
+    ],
+    [
+      "L9",
+      "L4"
+    ],
+    [
+      "L82",
+      "L28"
+    ],
+    [
+      "L69",
+      "L36"
+    ],
+    [
+      "L56",
+      "L18"
+    ],
+    [
+      "L23",
+      "L44"
+    ],
+    [
+      "L10",
+      "L45"
+    ],
+    [
+      "L73",
+      "L57"
+    ],
+    [
+      "L37",
+      "L35"
+    ],
+    [
+      "L75",
+      "L16"
+    ],
+    [
+      "L17",
+      "L1"
+    ],
+    [
+      "L51",
+      "L75"
+    ],
+    [
+      "L25",
+      "L49"
+    ],
+    [
+      "L28",
+      "L61"
+    ]
+  ],
+  "17": [
+    [
+      "L32",
+      "L75"
+    ],
+    [
+      "L79",
+      "L42"
+    ],
+    [
+      "L70",
+      "L33"
+    ],
+    [
+      "L25",
+      "L7"
+    ],
+    [
+      "L21",
+      "L40"
+    ],
+    [
+      "L80",
+      "L1"
+    ],
+    [
+      "L27",
+      "L57"
+    ],
+    [
+      "L4",
+      "L38"
+    ],
+    [
+      "L38",
+      "L22"
+    ],
+    [
+      "L71",
+      "L12"
+    ],
+    [
+      "L11",
+      "L9"
+    ],
+    [
+      "L47",
+      "L50"
+    ],
+    [
+      "L69",
+      "L59"
+    ],
+    [
+      "L22",
+      "L77"
+    ],
+    [
+      "L35",
+      "L74"
+    ],
+    [
+      "L50",
+      "L65"
+    ],
+    [
+      "L61",
+      "L13"
+    ],
+    [
+      "L74",
+      "L25"
+    ],
+    [
+      "L45",
+      "L9"
+    ],
+    [
+      "L55",
+      "L61"
+    ]
+  ],
+  "18": [
+    [
+      "L2",
+      "L29"
+    ],
+    [
+      "L53",
+      "L76"
+    ],
+    [
+      "L69",
+      "L60"
+    ],
+    [
+      "L3",
+      "L82"
+    ],
+    [
+      "L12",
+      "L30"
+    ],
+    [
+      "L73",
+      "L16"
+    ],
+    [
+      "L55",
+      "L68"
+    ],
+    [
+      "L14",
+      "L48"
+    ],
+    [
+      "L59",
+      "L18"
+    ],
+    [
+      "L64",
+      "L28"
+    ],
+    [
+      "L26",
+      "L33"
+    ],
+    [
+      "L49",
+      "L4"
+    ],
+    [
+      "L56",
+      "L43"
+    ],
+    [
+      "L22",
+      "L46"
+    ],
+    [
+      "L2",
+      "L34"
+    ],
+    [
+      "L5",
+      "L10"
+    ],
+    [
+      "L66",
+      "L78"
+    ],
+    [
+      "L27",
+      "L17"
+    ],
+    [
+      "L69",
+      "L41"
+    ],
+    [
+      "L55",
+      "L19"
+    ]
+  ],
+  "19": [
+    [
+      "L43",
+      "L64"
+    ],
+    [
+      "L9",
+      "L82"
+    ],
+    [
+      "L13",
+      "L45"
+    ],
+    [
+      "L63",
+      "L40"
+    ],
+    [
+      "L36",
+      "L20"
+    ],
+    [
+      "L18",
+      "L14"
+    ],
+    [
+      "L16",
+      "L27"
+    ],
+    [
+      "L7",
+      "L73"
+    ],
+    [
+      "L69",
+      "L79"
+    ],
+    [
+      "L22",
+      "L33"
+    ],
+    [
+      "L15",
+      "L34"
+    ],
+    [
+      "L57",
+      "L35"
+    ],
+    [
+      "L8",
+      "L28"
+    ],
+    [
+      "L61",
+      "L11"
+    ],
+    [
+      "L80",
+      "L13"
+    ],
+    [
+      "L23",
+      "L28"
+    ],
+    [
+      "L73",
+      "L28"
+    ],
+    [
+      "L76",
+      "L73"
+    ],
+    [
+      "L56",
+      "L66"
+    ],
+    [
+      "L27",
+      "L61"
+    ]
+  ],
+  "20": [
+    [
+      "L17",
+      "L23"
+    ],
+    [
+      "L2",
+      "L1"
+    ],
+    [
+      "L57",
+      "L26"
+    ],
+    [
+      "L78",
+      "L59"
+    ],
+    [
+      "L76",
+      "L27"
+    ],
+    [
+      "L37",
+      "L31"
+    ],
+    [
+      "L13",
+      "L76"
+    ],
+    [
+      "L11",
+      "L6"
+    ],
+    [
+      "L79",
+      "L51"
+    ],
+    [
+      "L47",
+      "L73"
+    ],
+    [
+      "L11",
+      "L30"
+    ],
+    [
+      "L12",
+      "L16"
+    ],
+    [
+      "L65",
+      "L8"
+    ],
+    [
+      "L58",
+      "L42"
+    ],
+    [
+      "L75",
+      "L34"
+    ],
+    [
+      "L36",
+      "L64"
+    ],
+    [
+      "L77",
+      "L56"
+    ],
+    [
+      "L72",
+      "L19"
+    ],
+    [
+      "L68",
+      "L28"
+    ],
+    [
+      "L6",
+      "L55"
+    ]
+  ],
+  "21": [
+    [
+      "L62",
+      "L81"
+    ],
+    [
+      "L51",
+      "L63"
+    ],
+    [
+      "L1",
+      "L31"
+    ],
+    [
+      "L56",
+      "L68"
+    ],
+    [
+      "L67",
+      "L53"
+    ],
+    [
+      "L59",
+      "L73"
+    ],
+    [
+      "L65",
+      "L22"
+    ],
+    [
+      "L44",
+      "L33"
+    ],
+    [
+      "L48",
+      "L79"
+    ],
+    [
+      "L31",
+      "L60"
+    ],
+    [
+      "L78",
+      "L71"
+    ],
+    [
+      "L45",
+      "L69"
+    ],
+    [
+      "L54",
+      "L60"
+    ],
+    [
+      "L42",
+      "L47"
+    ],
+    [
+      "L62",
+      "L53"
+    ],
+    [
+      "L45",
+      "L66"
+    ],
+    [
+      "L41",
+      "L6"
+    ],
+    [
+      "L33",
+      "L41"
+    ],
+    [
+      "L61",
+      "L56"
+    ],
+    [
+      "L19",
+      "L67"
+    ]
+  ],
+  "22": [
+    [
+      "L75",
+      "L59"
+    ],
+    [
+      "L75",
+      "L64"
+    ],
+    [
+      "L47",
+      "L46"
+    ],
+    [
+      "L19",
+      "L9"
+    ],
+    [
+      "L53",
+      "L70"
+    ],
+    [
+      "L23",
+      "L46"
+    ],
+    [
+      "L68",
+      "L29"
+    ],
+    [
+      "L21",
+      "L42"
+    ],
+    [
+      "L38",
+      "L40"
+    ],
+    [
+      "L25",
+      "L38"
+    ],
+    [
+      "L61",
+      "L46"
+    ],
+    [
+      "L14",
+      "L57"
+    ],
+    [
+      "L47",
+      "L82"
+    ],
+    [
+      "L7",
+      "L60"
+    ],
+    [
+      "L40",
+      "L1"
+    ],
+    [
+      "L81",
+      "L51"
+    ],
+    [
+      "L21",
+      "L32"
+    ],
+    [
+      "L11",
+      "L10"
+    ],
+    [
+      "L5",
+      "L13"
+    ],
+    [
+      "L78",
+      "L65"
+    ]
+  ],
+  "23": [
+    [
+      "L74",
+      "L16"
+    ],
+    [
+      "L81",
+      "L8"
+    ],
+    [
+      "L44",
+      "L77"
+    ],
+    [
+      "L20",
+      "L12"
+    ],
+    [
+      "L39",
+      "L13"
+    ],
+    [
+      "L68",
+      "L39"
+    ],
+    [
+      "L4",
+      "L39"
+    ],
+    [
+      "L70",
+      "L1"
+    ],
+    [
+      "L10",
+      "L54"
+    ],
+    [
+      "L44",
+      "L78"
+    ],
+    [
+      "L6",
+      "L66"
+    ],
+    [
+      "L35",
+      "L17"
+    ],
+    [
+      "L80",
+      "L72"
+    ],
+    [
+      "L23",
+      "L5"
+    ],
+    [
+      "L21",
+      "L11"
+    ],
+    [
+      "L31",
+      "L74"
+    ],
+    [
+      "L27",
+      "L47"
+    ],
+    [
+      "L25",
+      "L51"
+    ],
+    [
+      "L50",
+      "L44"
+    ],
+    [
+      "L27",
+      "L72"
+    ]
+  ],
+  "24": [
+    [
+      "L49",
+      "L31"
+    ],
+    [
+      "L76",
+      "L50"
+    ],
+    [
+      "L40",
+      "L13"
+    ],
+    [
+      "L61",
+      "L69"
+    ],
+    [
+      "L42",
+      "L60"
+    ],
+    [
+      "L72",
+      "L7"
+    ],
+    [
+      "L58",
+      "L78"
+    ],
+    [
+      "L78",
+      "L54"
+    ],
+    [
+      "L41",
+      "L16"
+    ],
+    [
+      "L4",
+      "L41"
+    ],
+    [
+      "L8",
+      "L16"
+    ],
+    [
+      "L29",
+      "L67"
+    ],
+    [
+      "L10",
+      "L74"
+    ],
+    [
+      "L78",
+      "L31"
+    ],
+    [
+      "L60",
+      "L14"
+    ],
+    [
+      "L24",
+      "L12"
+    ],
+    [
+      "L47",
+      "L18"
+    ],
+    [
+      "L72",
+      "L14"
+    ],
+    [
+      "L42",
+      "L57"
+    ],
+    [
+      "L3",
+      "L60"
+    ]
+  ],
+  "25": [
+    [
+      "L29",
+      "L54"
+    ],
+    [
+      "L74",
+      "L70"
+    ],
+    [
+      "L27",
+      "L33"
+    ],
+    [
+      "L78",
+      "L7"
+    ],
+    [
+      "L71",
+      "L23"
+    ],
+    [
+      "L16",
+      "L49"
+    ],
+    [
+      "L27",
+      "L9"
+    ],
+    [
+      "L30",
+      "L78"
+    ],
+    [
+      "L77",
+      "L29"
+    ],
+    [
+      "L45",
+      "L34"
+    ],
+    [
+      "L9",
+      "L37"
+    ],
+    [
+      "L82",
+      "L48"
+    ],
+    [
+      "L9",
+      "L23"
+    ],
+    [
+      "L61",
+      "L1"
+    ],
+    [
+      "L22",
+      "L60"
+    ],
+    [
+      "L15",
+      "L53"
+    ],
+    [
+      "L71",
+      "L79"
+    ],
+    [
+      "L48",
+      "L39"
+    ],
+    [
+      "L71",
+      "L21"
+    ],
+    [
+      "L47",
+      "L71"
+    ]
+  ],
+  "26": [
+    [
+      "L17",
+      "L22"
+    ],
+    [
+      "L21",
+      "L70"
+    ],
+    [
+      "L19",
+      "L51"
+    ],
+    [
+      "L24",
+      "L77"
+    ],
+    [
+      "L20",
+      "L66"
+    ],
+    [
+      "L52",
+      "L65"
+    ],
+    [
+      "L73",
+      "L4"
+    ],
+    [
+      "L15",
+      "L18"
+    ],
+    [
+      "L10",
+      "L72"
+    ],
+    [
+      "L8",
+      "L55"
+    ],
+    [
+      "L14",
+      "L62"
+    ],
+    [
+      "L44",
+      "L10"
+    ],
+    [
+      "L63",
+      "L66"
+    ],
+    [
+      "L3",
+      "L77"
+    ],
+    [
+      "L80",
+      "L30"
+    ],
+    [
+      "L48",
+      "L55"
+    ],
+    [
+      "L34",
+      "L19"
+    ],
+    [
+      "L5",
+      "L60"
+    ],
+    [
+      "L4",
+      "L63"
+    ],
+    [
+      "L21",
+      "L20"
+    ]
+  ],
+  "27": [
+    [
+      "L49",
+      "L62"
+    ],
+    [
+      "L43",
+      "L5"
+    ],
+    [
+      "L20",
+      "L4"
+    ],
+    [
+      "L44",
+      "L34"
+    ],
+    [
+      "L10",
+      "L57"
+    ],
+    [
+      "L31",
+      "L50"
+    ],
+    [
+      "L22",
+      "L55"
+    ],
+    [
+      "L76",
+      "L79"
+    ],
+    [
+      "L24",
+      "L23"
+    ],
+    [
+      "L72",
+      "L65"
+    ],
+    [
+      "L78",
+      "L27"
+    ],
+    [
+      "L35",
+      "L24"
+    ],
+    [
+      "L5",
+      "L36"
+    ],
+    [
+      "L13",
+      "L29"
+    ],
+    [
+      "L1",
+      "L79"
+    ],
+    [
+      "L72",
+      "L15"
+    ],
+    [
+      "L73",
+      "L51"
+    ],
+    [
+      "L1",
+      "L3"
+    ],
+    [
+      "L75",
+      "L9"
+    ],
+    [
+      "L10",
+      "L68"
+    ]
+  ],
+  "28": [
+    [
+      "L15",
+      "L42"
+    ],
+    [
+      "L54",
+      "L56"
+    ],
+    [
+      "L79",
+      "L29"
+    ],
+    [
+      "L82",
+      "L80"
+    ],
+    [
+      "L10",
+      "L4"
+    ],
+    [
+      "L71",
+      "L56"
+    ],
+    [
+      "L49",
+      "L30"
+    ],
+    [
+      "L73",
+      "L22"
+    ],
+    [
+      "L27",
+      "L3"
+    ],
+    [
+      "L77",
+      "L75"
+    ],
+    [
+      "L7",
+      "L24"
+    ],
+    [
+      "L18",
+      "L52"
+    ],
+    [
+      "L82",
+      "L81"
+    ],
+    [
+      "L20",
+      "L54"
+    ],
+    [
+      "L27",
+      "L36"
+    ],
+    [
+      "L18",
+      "L64"
+    ],
+    [
+      "L9",
+      "L40"
+    ],
+    [
+      "L55",
+      "L70"
+    ],
+    [
+      "L30",
+      "L5"
+    ],
+    [
+      "L2",
+      "L22"
+    ]
+  ],
+  "29": [
+    [
+      "L23",
+      "L58"
+    ],
+    [
+      "L66",
+      "L22"
+    ],
+    [
+      "L70",
+      "L9"
+    ],
+    [
+      "L38",
+      "L70"
+    ],
+    [
+      "L9",
+      "L68"
+    ],
+    [
+      "L65",
+      "L21"
+    ],
+    [
+      "L31",
+      "L21"
+    ],
+    [
+      "L10",
+      "L62"
+    ],
+    [
+      "L20",
+      "L74"
+    ],
+    [
+      "L17",
+      "L45"
+    ],
+    [
+      "L75",
+      "L1"
+    ],
+    [
+      "L18",
+      "L10"
+    ],
+    [
+      "L48",
+      "L46"
+    ],
+    [
+      "L62",
+      "L65"
+    ],
+    [
+      "L39",
+      "L34"
+    ],
+    [
+      "L75",
+      "L65"
+    ],
+    [
+      "L10",
+      "L51"
+    ],
+    [
+      "L52",
+      "L33"
+    ],
+    [
+      "L51",
+      "L30"
+    ],
+    [
+      "L33",
+      "L5"
+    ]
+  ],
+  "30": [
+    [
+      "L64",
+      "L4"
+    ],
+    [
+      "L36",
+      "L39"
+    ],
+    [
+      "L7",
+      "L79"
+    ],
+    [
+      "L10",
+      "L22"
+    ],
+    [
+      "L48",
+      "L43"
+    ],
+    [
+      "L27",
+      "L25"
+    ],
+    [
+      "L31",
+      "L18"
+    ],
+    [
+      "L20",
+      "L72"
+    ],
+    [
+      "L64",
+      "L45"
+    ],
+    [
+      "L51",
+      "L61"
+    ],
+    [
+      "L72",
+      "L29"
+    ],
+    [
+      "L26",
+      "L51"
+    ],
+    [
+      "L30",
+      "L69"
+    ],
+    [
+      "L53",
+      "L64"
+    ],
+    [
+      "L36",
+      "L15"
+    ],
+    [
+      "L49",
+      "L42"
+    ],
+    [
+      "L72",
+      "L69"
+    ],
+    [
+      "L80",
+      "L16"
+    ],
+    [
+      "L21",
+      "L14"
+    ],
+    [
+      "L14",
+      "L66"
+    ]
+  ]
+};
+
+
+/* =====================================================
+   6. Assign one of the 30 surveys
+
+   Optional forced assignment:
+   https://.../index.html?survey=12
+
+   Otherwise, one survey is selected randomly and kept
+   through refreshes in the same browser tab.
+   ===================================================== */
+
+const surveyIds = Object.keys(surveyProfiles);
+const urlSurvey = new URLSearchParams(window.location.search).get("survey");
+
+let assignedSurvey = sessionStorage.getItem("assigned_survey");
+
+if (urlSurvey && surveyProfiles[urlSurvey]) {
+  assignedSurvey = urlSurvey;
+  sessionStorage.setItem("assigned_survey", assignedSurvey);
+} else if (!assignedSurvey || !surveyProfiles[assignedSurvey]) {
+  assignedSurvey =
+    surveyIds[Math.floor(Math.random() * surveyIds.length)];
+  sessionStorage.setItem("assigned_survey", assignedSurvey);
+}
+
+
+/* =====================================================
+   7. Build the 20 comparisons
+
+   Left/right order is randomized once and saved in
+   sessionStorage, so refreshing does not change it.
+   ===================================================== */
+
+function buildComparisons() {
+  return surveyProfiles[assignedSurvey].map(
+    ([firstLabel, secondLabel], index) => {
+      const swap = Math.random() < 0.5;
+
+      const leftLabel = swap ? secondLabel : firstLabel;
+      const rightLabel = swap ? firstLabel : secondLabel;
+
+      return {
+        choice_set: index + 1,
+        leftLabel,
+        rightLabel,
+        leftDesign: designMap[leftLabel],
+        rightDesign: designMap[rightLabel]
+      };
+    }
+  );
+}
+
+const comparisonStorageKey = "comparisons_" + assignedSurvey;
+let comparisons;
+
+try {
+  comparisons = JSON.parse(sessionStorage.getItem(comparisonStorageKey));
+} catch (error) {
+  comparisons = null;
+}
+
+if (!Array.isArray(comparisons) || comparisons.length !== 20) {
+  comparisons = buildComparisons();
+  sessionStorage.setItem(
+    comparisonStorageKey,
+    JSON.stringify(comparisons)
+  );
+}
+
+
+/* =====================================================
+   8. Trial state
+   ===================================================== */
+
+let trial = Number(sessionStorage.getItem("current_trial") || 0);
+let submitting = false;
+
+if (!Number.isInteger(trial) || trial < 0 || trial > comparisons.length) {
+  trial = 0;
+}
+
+
+/* =====================================================
+   9. Draw one design
+   ===================================================== */
 
 function drawDesign(containerId, designString) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
 
-  for (const digit of designString) {
+  if (!designString || designString.length !== positions.length) {
+    container.textContent = "Design could not be loaded.";
+    console.error("Invalid design:", designString);
+    return;
+  }
+
+  for (let pos = 0; pos < designString.length; pos++) {
+    const pieceId = designString[pos];
+    const location = positions[pos];
+
     const img = document.createElement("img");
-    img.src = `JMP_images/${digit}.png`;
+    img.src = `${pieceFolder}/${pieceId}.png`;
+    img.alt = "";
+    img.className = "piece";
+    img.draggable = false;
+
+    img.style.left = location.x + "px";
+    img.style.top = location.y + "px";
+    img.style.width = pieceWidths[pieceId] + "px";
+
     container.appendChild(img);
   }
 }
 
+
+/* =====================================================
+   10. Display current comparison
+   ===================================================== */
+
+function setCanvasesDisabled(disabled) {
+  document.getElementById("leftDesign")
+    .classList.toggle("disabled", disabled);
+  document.getElementById("rightDesign")
+    .classList.toggle("disabled", disabled);
+}
+
 function showTrial() {
   if (trial >= comparisons.length) {
-    document.body.innerHTML = "<h2>Thank you!</h2><p>Your responses have been recorded.</p>";
+    sessionStorage.removeItem("current_trial");
+
+    document.body.innerHTML = `
+      <div class="completion">
+        <h2>Thank you!</h2>
+        <p>Your responses have been recorded.</p>
+      </div>
+    `;
     return;
   }
 
-  const [left, right] = comparisons[trial];
+  const pair = comparisons[trial];
 
-  drawDesign("leftDesign", left);
-  drawDesign("rightDesign", right);
+  drawDesign("leftDesign", pair.leftDesign);
+  drawDesign("rightDesign", pair.rightDesign);
 
-  document.getElementById("progress").innerText =
+  document.getElementById("progress").textContent =
     `Question ${trial + 1} of ${comparisons.length}`;
+
+  document.getElementById("status").textContent = "";
+  setCanvasesDisabled(false);
 }
 
-function submitChoice(choice) {
-  const [left, right] = comparisons[trial];
 
-  fetch(GOOGLE_SCRIPT_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      participant_id: participant_id,
-      trial_id: trial + 1,
-      left_design: left,
-      right_design: right,
-      preference: choice
-    })
-  });
+/* =====================================================
+   11. Submit one response
 
-  trial++;
-  showTrial();
+   Both the L-labels and actual permutations are sent.
+   ===================================================== */
+
+async function submitChoice(preference) {
+  if (submitting || trial >= comparisons.length) return;
+
+  submitting = true;
+  setCanvasesDisabled(true);
+  document.getElementById("status").textContent =
+    "Saving your response...";
+
+  const pair = comparisons[trial];
+
+  const winningLabel =
+    preference === "left" ? pair.leftLabel : pair.rightLabel;
+
+  const winningDesign =
+    preference === "left" ? pair.leftDesign : pair.rightDesign;
+
+  const payload = {
+    participant_id,
+    survey_id: assignedSurvey,
+    trial_id: trial + 1,
+    choice_set: pair.choice_set,
+
+    left_label: pair.leftLabel,
+    right_label: pair.rightLabel,
+    left_design: pair.leftDesign,
+    right_design: pair.rightDesign,
+
+    preference,
+    winning_label: winningLabel,
+    winning_design: winningDesign
+  };
+
+  try {
+    await fetch(GOOGLE_SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    trial++;
+    sessionStorage.setItem("current_trial", String(trial));
+    showTrial();
+
+  } catch (error) {
+    console.error(error);
+    document.getElementById("status").textContent =
+      "The response could not be sent. Please click again.";
+    setCanvasesDisabled(false);
+
+  } finally {
+    submitting = false;
+  }
 }
+
+
+/* =====================================================
+   12. Click and keyboard controls
+   ===================================================== */
+
+document.getElementById("leftDesign").addEventListener(
+  "click",
+  () => submitChoice("left")
+);
+
+document.getElementById("rightDesign").addEventListener(
+  "click",
+  () => submitChoice("right")
+);
+
+document.getElementById("leftDesign").addEventListener(
+  "keydown",
+  event => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      submitChoice("left");
+    }
+  }
+);
+
+document.getElementById("rightDesign").addEventListener(
+  "keydown",
+  event => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      submitChoice("right");
+    }
+  }
+);
+
+
+/* =====================================================
+   13. Start survey
+   ===================================================== */
 
 showTrial();
-</script>
 
+</script>
 </body>
 </html>
