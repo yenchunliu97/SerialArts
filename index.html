@@ -6,9 +6,7 @@
   <title>Shape Preference Survey</title>
 
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       font-family: Arial, sans-serif;
@@ -18,9 +16,7 @@
       color: #333;
     }
 
-    h2 {
-      margin-bottom: 5px;
-    }
+    h2 { margin-bottom: 5px; }
 
     .survey {
       display: flex;
@@ -31,9 +27,7 @@
       flex-wrap: wrap;
     }
 
-    .panel {
-      text-align: center;
-    }
+    .panel { text-align: center; }
 
     .canvas {
       position: relative;
@@ -44,7 +38,7 @@
       border-radius: 16px;
       cursor: pointer;
       overflow: hidden;
-      transition: border-color 0.15s, transform 0.15s;
+      transition: border-color 0.12s, transform 0.12s;
     }
 
     .canvas:hover {
@@ -54,7 +48,7 @@
 
     .canvas.disabled {
       pointer-events: none;
-      opacity: 0.75;
+      opacity: 0.72;
     }
 
     .piece {
@@ -62,6 +56,7 @@
       height: auto;
       user-select: none;
       pointer-events: none;
+      -webkit-user-drag: none;
     }
 
     #progress {
@@ -70,10 +65,10 @@
     }
 
     #status {
-      min-height: 24px;
+      min-height: 22px;
       margin-top: 8px;
-      font-size: 14px;
       color: #6b6259;
+      font-size: 14px;
     }
 
     .completion {
@@ -85,20 +80,19 @@
       border-radius: 16px;
     }
 
+    .retry-button {
+      margin-top: 16px;
+      padding: 10px 18px;
+      border: 1px solid #aaa;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
     @media (max-width: 950px) {
-      body {
-        margin: 16px;
-      }
-
-      .survey {
-        gap: 28px;
-      }
-
-      .canvas {
-        width: 360px;
-        height: 446px;
-        transform-origin: top left;
-      }
+      body { margin: 16px; }
+      .survey { gap: 28px; }
     }
   </style>
 </head>
@@ -128,18 +122,15 @@
 "use strict";
 
 /* =====================================================
-   1. Google Sheets Apps Script URL
+   1. Google Apps Script endpoint
    ===================================================== */
 
 const GOOGLE_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbwOW-ZcrehJGFQMcVsiU2BJYLE31RLwmUuRdHEr5grXtGndjaeWv76fEq-aHq_ZEsyg/exec";
+  "https://script.google.com/macros/s/AKfycbxPQlehjmHvwBka8R6lnIC10MS_lHl75TwVw8pdt6DqaqeyIwusAelCfAWAnBcmYo7T/exec";
 
 
 /* =====================================================
-   2. Participant/session identifiers
-
-   sessionStorage keeps the same assignment if the user
-   refreshes the page in the same browser tab.
+   2. Participant/session ID
    ===================================================== */
 
 function makeId() {
@@ -174,18 +165,18 @@ const pieceWidths = {
 };
 
 const positions = [
-  {x: 23,  y: 106},  // position 1
-  {x: 81,  y: 109},  // position 2
-  {x: 163, y: 182},  // position 3
-  {x: 117, y: 259},  // position 4
-  {x: 32,  y: 286},  // position 5
-  {x: 116, y: 376},  // position 6
-  {x: 261, y: 318}   // position 7
+  {x: 23,  y: 106},
+  {x: 81,  y: 109},
+  {x: 163, y: 182},
+  {x: 117, y: 259},
+  {x: 32,  y: 286},
+  {x: 116, y: 376},
+  {x: 261, y: 318}
 ];
 
 
 /* =====================================================
-   4. Design labels L1,...,L82 mapped to permutations
+   4. Design and survey definitions
    ===================================================== */
 
 const designMap = {
@@ -272,13 +263,6 @@ const designMap = {
   "L81": "1764523",
   "L82": "1273546"
 };
-
-
-/* =====================================================
-   5. Thirty survey versions from Choice Profiles.csv
-
-   Each survey contains exactly 20 pairs of labels.
-   ===================================================== */
 
 const surveyProfiles = {
   "1": [
@@ -2745,22 +2729,17 @@ const surveyProfiles = {
 
 
 /* =====================================================
-   6. Assign one of the 30 surveys
-
-   Optional forced assignment:
-   https://.../index.html?survey=12
-
-   Otherwise, one survey is selected randomly and kept
-   through refreshes in the same browser tab.
+   5. Survey assignment
    ===================================================== */
 
 const surveyIds = Object.keys(surveyProfiles);
-const urlSurvey = new URLSearchParams(window.location.search).get("survey");
+const requestedSurvey =
+  new URLSearchParams(window.location.search).get("survey");
 
 let assignedSurvey = sessionStorage.getItem("assigned_survey");
 
-if (urlSurvey && surveyProfiles[urlSurvey]) {
-  assignedSurvey = urlSurvey;
+if (requestedSurvey && surveyProfiles[requestedSurvey]) {
+  assignedSurvey = requestedSurvey;
   sessionStorage.setItem("assigned_survey", assignedSurvey);
 } else if (!assignedSurvey || !surveyProfiles[assignedSurvey]) {
   assignedSurvey =
@@ -2770,22 +2749,17 @@ if (urlSurvey && surveyProfiles[urlSurvey]) {
 
 
 /* =====================================================
-   7. Build the 20 comparisons
-
-   Left/right order is randomized once and saved in
-   sessionStorage, so refreshing does not change it.
+   6. Build 20 comparisons and randomize left/right once
    ===================================================== */
 
 function buildComparisons() {
   return surveyProfiles[assignedSurvey].map(
-    ([firstLabel, secondLabel], index) => {
+    ([firstLabel, secondLabel]) => {
       const swap = Math.random() < 0.5;
-
       const leftLabel = swap ? secondLabel : firstLabel;
       const rightLabel = swap ? firstLabel : secondLabel;
 
       return {
-        choice_set: index + 1,
         leftLabel,
         rightLabel,
         leftDesign: designMap[leftLabel],
@@ -2795,8 +2769,8 @@ function buildComparisons() {
   );
 }
 
-const comparisonStorageKey = "comparisons_" + assignedSurvey;
-let comparisons;
+const comparisonStorageKey = "comparisons_fast_v1_" + assignedSurvey;
+let comparisons = null;
 
 try {
   comparisons = JSON.parse(sessionStorage.getItem(comparisonStorageKey));
@@ -2804,7 +2778,18 @@ try {
   comparisons = null;
 }
 
-if (!Array.isArray(comparisons) || comparisons.length !== 20) {
+const validComparisons =
+  Array.isArray(comparisons) &&
+  comparisons.length === 20 &&
+  comparisons.every(pair =>
+    pair &&
+    pair.leftLabel &&
+    pair.rightLabel &&
+    pair.leftDesign &&
+    pair.rightDesign
+  );
+
+if (!validComparisons) {
   comparisons = buildComparisons();
   sessionStorage.setItem(
     comparisonStorageKey,
@@ -2814,14 +2799,50 @@ if (!Array.isArray(comparisons) || comparisons.length !== 20) {
 
 
 /* =====================================================
-   8. Trial state
+   7. Restore progress if page refreshes
    ===================================================== */
 
-let trial = Number(sessionStorage.getItem("current_trial") || 0);
-let submitting = false;
+let responses = [];
+
+try {
+  responses =
+    JSON.parse(sessionStorage.getItem("survey_responses_fast_v1")) || [];
+} catch (error) {
+  responses = [];
+}
+
+let trial = responses.length;
 
 if (!Number.isInteger(trial) || trial < 0 || trial > comparisons.length) {
+  responses = [];
   trial = 0;
+  sessionStorage.removeItem("survey_responses_fast_v1");
+}
+
+let submitting = false;
+
+
+/* =====================================================
+   8. Preload all seven images for fast display
+   ===================================================== */
+
+const imageCache = {};
+
+function preloadImages() {
+  return Promise.all(
+    Object.keys(pieceWidths).map(pieceId => {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => {
+          console.error("Could not load image:", img.src);
+          resolve();
+        };
+        img.src = `${pieceFolder}/${pieceId}.png`;
+        imageCache[pieceId] = img;
+      });
+    })
+  );
 }
 
 
@@ -2835,20 +2856,25 @@ function drawDesign(containerId, designString) {
 
   if (!designString || designString.length !== positions.length) {
     container.textContent = "Design could not be loaded.";
-    console.error("Invalid design:", designString);
     return;
   }
 
   for (let pos = 0; pos < designString.length; pos++) {
     const pieceId = designString[pos];
     const location = positions[pos];
+    const sourceImage = imageCache[pieceId];
 
-    const img = document.createElement("img");
-    img.src = `${pieceFolder}/${pieceId}.png`;
+    const img = sourceImage
+      ? sourceImage.cloneNode()
+      : document.createElement("img");
+
+    if (!sourceImage) {
+      img.src = `${pieceFolder}/${pieceId}.png`;
+    }
+
     img.alt = "";
     img.className = "piece";
     img.draggable = false;
-
     img.style.left = location.x + "px";
     img.style.top = location.y + "px";
     img.style.width = pieceWidths[pieceId] + "px";
@@ -2871,14 +2897,7 @@ function setCanvasesDisabled(disabled) {
 
 function showTrial() {
   if (trial >= comparisons.length) {
-    sessionStorage.removeItem("current_trial");
-
-    document.body.innerHTML = `
-      <div class="completion">
-        <h2>Thank you!</h2>
-        <p>Your responses have been recorded.</p>
-      </div>
-    `;
+    submitAllResponses();
     return;
   }
 
@@ -2896,42 +2915,53 @@ function showTrial() {
 
 
 /* =====================================================
-   11. Submit one response
-
-   Both the L-labels and actual permutations are sent.
+   11. Save choice locally and move instantly
    ===================================================== */
 
-async function submitChoice(preference) {
+function submitChoice(preference) {
   if (submitting || trial >= comparisons.length) return;
-
-  submitting = true;
-  setCanvasesDisabled(true);
-  document.getElementById("status").textContent =
-    "Saving your response...";
 
   const pair = comparisons[trial];
 
-  const winningLabel =
-    preference === "left" ? pair.leftLabel : pair.rightLabel;
-
-  const winningDesign =
-    preference === "left" ? pair.leftDesign : pair.rightDesign;
-
-  const payload = {
-    participant_id,
+  responses.push({
     survey_id: assignedSurvey,
-    trial_id: trial + 1,
-    choice_set: pair.choice_set,
-
+    participant_id,
     left_label: pair.leftLabel,
     right_label: pair.rightLabel,
     left_design: pair.leftDesign,
     right_design: pair.rightDesign,
+    preference
+  });
 
-    preference,
-    winning_label: winningLabel,
-    winning_design: winningDesign
-  };
+  sessionStorage.setItem(
+    "survey_responses_fast_v1",
+    JSON.stringify(responses)
+  );
+
+  trial++;
+
+  if (trial >= comparisons.length) {
+    submitAllResponses();
+  } else {
+    showTrial();
+  }
+}
+
+
+/* =====================================================
+   12. Send all 20 rows to Google Sheets once
+   ===================================================== */
+
+async function submitAllResponses() {
+  if (submitting) return;
+  submitting = true;
+
+  document.body.innerHTML = `
+    <div class="completion">
+      <h2>Saving your responses...</h2>
+      <p>Please do not close this page.</p>
+    </div>
+  `;
 
   try {
     await fetch(GOOGLE_SCRIPT_URL, {
@@ -2940,18 +2970,35 @@ async function submitChoice(preference) {
       headers: {
         "Content-Type": "text/plain;charset=utf-8"
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        responses
+      })
     });
 
-    trial++;
-    sessionStorage.setItem("current_trial", String(trial));
-    showTrial();
+    sessionStorage.removeItem("survey_responses_fast_v1");
+    sessionStorage.removeItem("participant_id");
+    sessionStorage.removeItem("assigned_survey");
+    sessionStorage.removeItem(comparisonStorageKey);
+
+    document.body.innerHTML = `
+      <div class="completion">
+        <h2>Thank you!</h2>
+        <p>Your responses have been recorded.</p>
+      </div>
+    `;
 
   } catch (error) {
     console.error(error);
-    document.getElementById("status").textContent =
-      "The response could not be sent. Please click again.";
-    setCanvasesDisabled(false);
+
+    document.body.innerHTML = `
+      <div class="completion">
+        <h2>Responses could not be saved</h2>
+        <p>Your answers are still stored in this browser.</p>
+        <button class="retry-button" onclick="location.reload()">
+          Try again
+        </button>
+      </div>
+    `;
 
   } finally {
     submitting = false;
@@ -2960,7 +3007,7 @@ async function submitChoice(preference) {
 
 
 /* =====================================================
-   12. Click and keyboard controls
+   13. Click and keyboard controls
    ===================================================== */
 
 document.getElementById("leftDesign").addEventListener(
@@ -2995,10 +3042,12 @@ document.getElementById("rightDesign").addEventListener(
 
 
 /* =====================================================
-   13. Start survey
+   14. Start after images are preloaded
    ===================================================== */
 
-showTrial();
+document.getElementById("status").textContent = "Loading images...";
+
+preloadImages().then(showTrial);
 
 </script>
 </body>
